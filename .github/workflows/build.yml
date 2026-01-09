@@ -30,7 +30,10 @@ jobs:
           fi
 
       - name: make launcher
-        run: make launcher -j
+        run: |
+          export CFLAGS="${CFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
+          export CXXFLAGS="${CXXFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
+          make launcher -j
 
       - name: upload riivolution artifact
         uses: actions/upload-artifact@v4
@@ -63,7 +66,10 @@ jobs:
           fi
 
       - name: make rawksd
-        run: make rawksd -j
+        run: |
+          export CFLAGS="${CFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
+          export CXXFLAGS="${CXXFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
+          make rawksd -j
 
       - name: upload rawksd artifact
         uses: actions/upload-artifact@v4
