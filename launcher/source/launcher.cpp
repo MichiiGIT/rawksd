@@ -7,8 +7,20 @@
 
 #include <ogc/lwp_watchdog.h>
 #include <ogc/lwp_threads.h>
+#include <ogc/system.h>
 
 #include <malloc.h>
+
+#ifdef RETURN_TO_MENU
+static inline bool IsVWiiConsole()
+{
+#if defined(SYS_CONSOLE_WIIU)
+	return (SYS_GetConsoleType() == SYS_CONSOLE_WIIU);
+#else
+	return false;
+#endif
+}
+#endif
 
 #ifdef DEBUGGER
 #include <mega.h>
@@ -464,11 +476,15 @@ static inline void ApplyBinaryPatches(s32 app_section_size)
 #endif
 
 #ifdef RETURN_TO_MENU
-	// Return to Riiv is not working properly yet
-	if (*(u32*)0x80001808 == 0x48415858) // "HAXX"
-		PatchReturnToMenu(app_section_size, 0x00010001af1bf516llu);
-	PatchReturnToMenu(app_section_size, 0x000100014a4f4449llu); // "JODI"
-	PatchReturnToMenu(app_section_size, 0x0001000152494956llu); // "RIIV"
+	// vWii fix: On Wii U (vWii) patching __OSLaunchMenu can cause a blackscreen
+	// when leaving a game via HOME -> "Wii Menu". Therefore we skip this patch on vWii.
+	if (!IsVWiiConsole()) {
+		// Return to Riiv is not working properly yet
+		if (*(u32*)0x80001808 == 0x48415858) // "HAXX"
+			PatchReturnToMenu(app_section_size, 0x00010001af1bf516llu);
+		PatchReturnToMenu(app_section_size, 0x000100014a4f4449llu); // "JODI"
+		PatchReturnToMenu(app_section_size, 0x0001000152494956llu); // "RIIV"
+	}
 #endif
 
 	RVL_PatchMemory(&Disc, app_address, app_section_size);
