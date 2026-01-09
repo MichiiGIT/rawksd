@@ -3,12 +3,9 @@ name: Build rawksd (Riivolution + RawkSD)
 on:
   workflow_dispatch: {}
   push:
-    branches: [ "master", "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "master", "main" ]
-
-permissions:
-  contents: read
+    branches: [ "main", "master" ]
 
 jobs:
   riiv:
@@ -16,73 +13,78 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: devkitpro/devkitppc:20210726
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: dependencies (buster archive fix + 32-bit runtime + zip)
+      - name: Fix APT sources (Debian buster -> archive)
         run: |
-          set -e
-
-          # Debian buster in diesem Image ist EOL -> auf archive umstellen
-          if [ -f /etc/debian_version ] && grep -qE '^10\.' /etc/debian_version; then
+          set -eux
+          # buster ist EOL -> auf archive.debian.org umstellen + Valid-Until deaktivieren
+          if [ -f /etc/apt/sources.list ]; then
+            sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list
+            sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list
+            sed -i 's|http://security.debian.org|http://archive.debian.org|g' /etc/apt/sources.list
+            # buster-updates existiert so nicht mehr zuverlässig
+            sed -i '/buster-updates/d' /etc/apt/sources.list
             echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
-            sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list || true
-            sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list || true
-            # buster-updates/backports gibt’s auf archive oft nicht sauber -> raus
-            sed -i '/buster-updates/d;/buster-backports/d' /etc/apt/sources.list || true
           fi
 
+      - name: Dependencies (zip + 32-bit runtime libs)
+        run: |
+          set -eux
           dpkg --add-architecture i386
           apt-get -o Acquire::Check-Valid-Until=false update
-
-          # Tools + ggf. i386 runtime libs (wie im Original-Workflow)
           apt-get install -y --no-install-recommends \
-            g++ zip ca-certificates \
+            ca-certificates zip g++ \
             libgcc1:i386 zlib1g:i386
 
-      - name: make launcher
-        run: make launcher -j
+      - name: Build launcher
+        run: make launcher -j$(nproc)
 
-      - name: upload riivolution artifact
+      - name: Upload riivolution artifact
         uses: actions/upload-artifact@v4
         with:
           name: riivolution
           path: launcher/riiv.zip
 
-      - name: make riifs
-        run: make riifs -j
+      - name: Build riifs
+        run: make riifs -j$(nproc)
 
   rawk:
     name: RawkSD
     runs-on: ubuntu-latest
     container:
       image: devkitpro/devkitppc:20210726
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: dependencies (buster archive fix + python + yaml + 32-bit runtime + zip)
+      - name: Fix APT sources (Debian buster -> archive)
         run: |
-          set -e
-
-          if [ -f /etc/debian_version ] && grep -qE '^10\.' /etc/debian_version; then
+          set -eux
+          if [ -f /etc/apt/sources.list ]; then
+            sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list
+            sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list
+            sed -i 's|http://security.debian.org|http://archive.debian.org|g' /etc/apt/sources.list
+            sed -i '/buster-updates/d' /etc/apt/sources.list
             echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
-            sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list || true
-            sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list || true
-            sed -i '/buster-updates/d;/buster-backports/d' /etc/apt/sources.list || true
           fi
 
+      - name: Dependencies (zip + python + 32-bit runtime libs)
+        run: |
+          set -eux
           dpkg --add-architecture i386
           apt-get -o Acquire::Check-Valid-Until=false update
-
           apt-get install -y --no-install-recommends \
-            g++ zip ca-certificates \
-            python3 python3-yaml \
-            libgcc1:i386 zlib1g:i386
+            ca-certificates zip g++ \
+            libgcc1:i386 zlib1g:i386 \
+            python3 python3-yaml
 
-      - name: make rawksd
-        run: make rawksd -j
+      - name: Build rawksd
+        run: make rawksd -j$(nproc)
 
-      - name: upload rawksd artifact
+      - name: Upload rawksd artifact
         uses: actions/upload-artifact@v4
         with:
           name: rawksd
@@ -95,10 +97,17 @@ jobs:
     defaults:
       run:
         shell: msys2 {0}
+
     steps:
-      - shell: C:\shells\msys2bash.cmd {0}
-        name: devkitPro
+      - uses: msys2/setup-msys2@v2
+        with:
+          release: false
+          install: >-
+            base-devel gcc python-yaml zip unzip python git
+
+      - name: devkitPro repos + keyring
         run: |
+          set -eux
           pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0 --keyserver keyserver.ubuntu.com || pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0
           pacman-key --lsign BC26F752D25B92CE272E0F44F7FD5492264BB9D0
           pacman --noconfirm -U https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.xz
@@ -106,13 +115,7 @@ jobs:
           echo -e '[dkp-windows]\nServer = https://pkg.devkitpro.org/packages/windows/$arch/' >> /etc/pacman.conf
           sed -i 's/^CheckSpace/#CheckSpace/g' /etc/pacman.conf
           pacman --noconfirm -Sy
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          release: false
-          install: >-
-            base-devel gcc python-yaml zip unzip python
-            wii-dev ppc-portlibs wii-portlibs devkitARM
+          pacman --noconfirm -S --needed wii-dev ppc-portlibs wii-portlibs devkitARM
 
       - uses: actions/checkout@v4
 
@@ -138,30 +141,3 @@ jobs:
         with:
           name: msys2-rawksd
           path: rawksd/rawk.zip
-
-  mingw:
-    name: Windows Mingw
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: make riifs
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mingw32-riifs
-          path: riifs/server-c/riifs.exe
-
-      - run: make -C stripios
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mingw32-stripios
-          path: stripios/stripios.exe
-
-      - run: make -C launcher/dollz3
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mingw32-dol2elf
-          path: launcher/dollz3/dol2elf.exe
