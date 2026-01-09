@@ -1,156 +1,89 @@
 name: Build rawksd (Riivolution + RawkSD)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
 
+permissions:
+  contents: read
+
 jobs:
-  riiv:
-    name: Riivolution
+  riivolution:
+    name: Riivolution (launcher)
     runs-on: ubuntu-latest
     container:
-      image: devkitpro/devkitppc:latest
-    steps:
-      - uses: actions/checkout@v4
+      image: devkitpro/devkitppc:20210726
 
-      - name: dependencies
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fix APT sources (Debian buster -> archive)
         run: |
           set -e
-          if command -v apt-get >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends zip ca-certificates
-          elif command -v pacman >/dev/null 2>&1; then
-            pacman -Syu --noconfirm zip ca-certificates
-          else
-            echo "No supported package manager found"
-            exit 1
-          fi
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
 
-      - name: make launcher
+      - name: Install deps (zip + 32-bit runtime libs)
         run: |
-          export CFLAGS="${CFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
-          export CXXFLAGS="${CXXFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
-          make launcher -j
+          set -e
+          dpkg --add-architecture i386
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends \
+            ca-certificates zip g++ \
+            libgcc1:i386 zlib1g:i386
 
-      - name: upload riivolution artifact
+      - name: Build launcher
+        run: make launcher -j
+
+      - name: Upload riiv.zip
         uses: actions/upload-artifact@v4
         with:
           name: riivolution
           path: launcher/riiv.zip
+          if-no-files-found: error
 
-      - name: make riifs
-        run: make riifs -j
-
-  rawk:
+  rawksd:
     name: RawkSD
     runs-on: ubuntu-latest
     container:
-      image: devkitpro/devkitppc:latest
-    steps:
-      - uses: actions/checkout@v4
+      image: devkitpro/devkitppc:20210726
 
-      - name: dependencies
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fix APT sources (Debian buster -> archive)
         run: |
           set -e
-          if command -v apt-get >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends zip python3 python3-yaml ca-certificates
-          elif command -v pacman >/dev/null 2>&1; then
-            pacman -Syu --noconfirm zip python python-yaml ca-certificates
-          else
-            echo "No supported package manager found"
-            exit 1
-          fi
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
 
-      - name: make rawksd
+      - name: Install deps (zip + python)
         run: |
-          export CFLAGS="${CFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
-          export CXXFLAGS="${CXXFLAGS} -Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=stringop-overread"
-          make rawksd -j
+          set -e
+          dpkg --add-architecture i386
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends \
+            ca-certificates zip g++ \
+            libgcc1:i386 zlib1g:i386 \
+            python3 python3-yaml
 
-      - name: upload rawksd artifact
+      - name: Build rawksd
+        run: make rawksd -j
+
+      - name: Upload rawk.zip
         uses: actions/upload-artifact@v4
         with:
           name: rawksd
           path: rawksd/rawk.zip
-
-  msys2:
-    name: Windows MSYS2
-    runs-on: windows-latest
-    continue-on-error: true
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - shell: C:\shells\msys2bash.cmd {0}
-        name: devkitPro
-        run: |
-          pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0 --keyserver keyserver.ubuntu.com || pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0
-          pacman-key --lsign BC26F752D25B92CE272E0F44F7FD5492264BB9D0
-          pacman --noconfirm -U https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.xz
-          echo -e '[dkp-libs]\nServer = https://pkg.devkitpro.org/packages' >> /etc/pacman.conf
-          echo -e '[dkp-windows]\nServer = https://pkg.devkitpro.org/packages/windows/$arch/' >> /etc/pacman.conf
-          sed -i 's/^CheckSpace/#CheckSpace/g' /etc/pacman.conf
-          pacman --noconfirm -Sy
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          release: false
-          install: >-
-            base-devel gcc python-yaml zip unzip python
-            wii-dev ppc-portlibs wii-portlibs devkitARM
-
-      - uses: actions/checkout@v4
-
-      - name: make launcher
-        run: |
-          DEVKITPRO=/opt/devkitpro DEVKITPPC=$DEVKITPRO/devkitPPC DEVKITARM=$DEVKITPRO/devkitARM \
-          make launcher -j
-
-      - name: upload msys2-riivolution
-        uses: actions/upload-artifact@v4
-        with:
-          name: msys2-riivolution
-          path: launcher/riiv.zip
-
-      - name: make rawksd
-        run: |
-          PYTHON=/usr/bin/python3.exe \
-          DEVKITPRO=/opt/devkitpro DEVKITPPC=$DEVKITPRO/devkitPPC DEVKITARM=$DEVKITPRO/devkitARM \
-          make rawksd -j
-
-      - name: upload msys2-rawksd
-        uses: actions/upload-artifact@v4
-        with:
-          name: msys2-rawksd
-          path: rawksd/rawk.zip
-
-  mingw:
-    name: Windows Mingw
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: make riifs
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mingw32-riifs
-          path: riifs/server-c/riifs.exe
-
-      - run: make -C stripios
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mingw32-stripios
-          path: stripios/stripios.exe
-
-      - run: make -C launcher/dollz3
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mingw32-dol2elf
-          path: launcher/dollz3/dol2elf.exe
+          if-no-files-found: error
